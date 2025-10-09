@@ -1,14 +1,16 @@
 // ==UserScript==
-// @name         超星代码粘贴助手
+// @name         超星粘贴助手
 // @namespace    http://tampermonkey.net/
-// @version      1.1.0
-// @description  绕过粘贴检测，智能显示/隐藏助手窗口，避免重复创建
+// @version      1.2.1
+// @description  绕过粘贴检测，支持代码题(CodeMirror)和作业题(UEditor)
 // @author       muqy1818
 // @match        *://*.chaoxing.com/*
 // @match        *://*.cx.com/*
 // @grant        none
 // @license      MIT
 // @run-at       document-idle
+// @homepage     https://github.com/muqy1818/ChaoXing_Code
+// @supportURL   https://github.com/muqy1818/ChaoXing_Code/issues
 // ==/UserScript==
 
 (function() {
@@ -20,7 +22,7 @@
     let isInitialized = false; // 初始化状态标记
 
     // 等待页面加载完成，返回是否检测到编辑器
-    function waitForCodeEditors() {
+    function waitForEditors() {
         return new Promise((resolve) => {
             let attempts = 0;
             const maxAttempts = 20; // 最多等待10秒
@@ -30,22 +32,47 @@
 
                 // 减少日志输出频率，避免卡顿
                 if (attempts % 5 === 0) {
-                    console.log(`[代码助手] 第${attempts}次检测 codeEditors...`);
+                    console.log(`[粘贴助手] 第${attempts}次检测编辑器...`);
                 }
 
-                // 检查 codeEditors 是否存在且有内容
+                let hasEditor = false;
+
+                // 检查 CodeMirror 编辑器
                 if (typeof window.codeEditors !== 'undefined' && window.codeEditors) {
                     const editorKeys = Object.keys(window.codeEditors);
                     if (editorKeys.length > 0) {
-                        console.log('[代码助手] CodeMirror编辑器检测成功，找到', editorKeys.length, '个编辑器');
-                        resolve(true); // 找到编辑器
-                        return;
+                        console.log('[粘贴助手] 检测到CodeMirror编辑器:', editorKeys.length, '个');
+                        hasEditor = true;
                     }
                 }
 
+                // 检查 UEditor 编辑器
+                if (typeof window.UE !== 'undefined' && window.UE.instants) {
+                    const ueKeys = Object.keys(window.UE.instants);
+                    let validCount = 0;
+                    ueKeys.forEach(key => {
+                        const editor = window.UE.instants[key];
+                        if (editor && editor.ready) {
+                            validCount++;
+                        }
+                    });
+                    if (validCount > 0) {
+                        console.log('[粘贴助手] 检测到UEditor编辑器:', validCount, '个');
+                        hasEditor = true;
+                    }
+                }
+
+                // 注意: 不检测textarea，因为超星的答题框都是UEditor接管的
+                // textarea只是占位元素，会被UEditor初始化为富文本编辑器
+
+                if (hasEditor) {
+                    resolve(true);
+                    return;
+                }
+
                 if (attempts >= maxAttempts) {
-                    console.log('[代码助手] 检测超时，未找到编辑器');
-                    resolve(false); // 未找到编辑器
+                    console.log('[粘贴助手] 检测超时，未找到编辑器');
+                    resolve(false);
                     return;
                 }
 
@@ -186,14 +213,14 @@
 
         container.innerHTML = `
             <div class="paste-helper-header">
-                <span class="paste-helper-title">代码粘贴助手</span>
+                <span class="paste-helper-title">超星粘贴助手</span>
                 <button class="paste-helper-minimize" title="最小化">−</button>
             </div>
             <div class="paste-helper-content">
                 <div class="paste-helper-info">
                     检测到编辑器: <span id="editor-count">0</span> 个
                 </div>
-                <textarea class="paste-helper-textarea" placeholder="在此输入要粘贴的代码..."></textarea>
+                <textarea class="paste-helper-textarea" placeholder="在此输入要粘贴的内容(代码/作业答案等)..."></textarea>
                 <div class="paste-helper-controls">
                     <label>选择编辑器:</label>
                     <select class="paste-helper-select">
@@ -212,23 +239,48 @@
 
     // 更新编辑器列表
     function updateEditorList() {
-        let editorKeys = [];
+        let allEditors = [];
 
-        // 检测编辑器
+        // 检测 CodeMirror 编辑器
         if (typeof window.codeEditors !== 'undefined' && window.codeEditors) {
-            editorKeys = Object.keys(window.codeEditors);
-            console.log('[代码助手] 更新编辑器列表:', editorKeys);
+            const cmKeys = Object.keys(window.codeEditors);
+            cmKeys.forEach(key => {
+                allEditors.push({
+                    type: 'codemirror',
+                    id: key,
+                    name: `代码编辑器 (${key})`
+                });
+            });
+            console.log('[粘贴助手] 检测到CodeMirror编辑器:', cmKeys.length, '个');
         }
 
+        // 检测 UEditor 编辑器
+        if (typeof window.UE !== 'undefined' && window.UE.instants) {
+            const ueKeys = Object.keys(window.UE.instants);
+            ueKeys.forEach(key => {
+                const editor = window.UE.instants[key];
+                // 只添加有效的编辑器实例
+                if (editor && editor.ready) {
+                    allEditors.push({
+                        type: 'ueditor',
+                        id: key,
+                        name: `作业编辑器 (${key})`
+                    });
+                }
+            });
+            console.log('[粘贴助手] 检测到UEditor编辑器:', ueKeys.length, '个');
+        }
+
+        // 注意: 超星的所有答题框都是UEditor，不存在纯textarea
+        // textarea元素只是占位符，会被UEditor接管并隐藏
+
         // 处理编辑器数量变化
-        if (editorKeys.length === 0) {
-            // 没有编辑器时隐藏窗口
+        if (allEditors.length === 0) {
             if (pasteHelper) {
                 hideHelper();
             }
             return;
         } else {
-            // 有编辑器时确保窗口可见
             if (!pasteHelper) {
                 createHelperIfNeeded();
             } else {
@@ -246,70 +298,113 @@
         select.innerHTML = '<option value="">请选择编辑器</option>';
 
         // 添加编辑器选项
-        editorKeys.forEach((key, index) => {
+        allEditors.forEach((editor, index) => {
             const option = document.createElement('option');
-            option.value = key;
-            option.textContent = `编辑器 ${index + 1} (${key})`;
+            option.value = JSON.stringify({ type: editor.type, id: editor.id });
+            option.textContent = editor.name;
             select.appendChild(option);
         });
 
-        countSpan.textContent = editorKeys.length;
+        countSpan.textContent = allEditors.length;
 
         // 如果只有一个编辑器，自动选择
-        if (editorKeys.length === 1) {
-            select.value = editorKeys[0];
+        if (allEditors.length === 1) {
+            select.value = JSON.stringify({ type: allEditors[0].type, id: allEditors[0].id });
         }
     }
 
-    // 粘贴代码到编辑器
+    // 粘贴内容到编辑器
     function pasteCode() {
         const textarea = pasteHelper.querySelector('.paste-helper-textarea');
         const select = pasteHelper.querySelector('.paste-helper-select');
         const status = pasteHelper.querySelector('.paste-helper-status');
 
-        const code = textarea.value.trim();
-        const selectedEditor = select.value;
+        const content = textarea.value;
+        const selectedEditorStr = select.value;
 
-        if (!code) {
-            status.textContent = '请输入要粘贴的代码';
+        if (!content) {
+            status.textContent = '请输入要粘贴的内容';
             status.style.color = '#f44336';
             return;
         }
 
-        if (!selectedEditor) {
+        if (!selectedEditorStr) {
             status.textContent = '请选择目标编辑器';
             status.style.color = '#f44336';
             return;
         }
 
-        if (typeof window.codeEditors === 'undefined' || !window.codeEditors[selectedEditor]) {
-            status.textContent = '目标编辑器不存在';
-            status.style.color = '#f44336';
-            return;
-        }
-
         try {
-            const editor = window.codeEditors[selectedEditor];
-            console.log('[代码助手] 开始粘贴代码到编辑器:', selectedEditor);
-            console.log('[代码助手] 编辑器对象:', editor);
-            console.log('[代码助手] 代码长度:', code.length);
+            const editorInfo = JSON.parse(selectedEditorStr);
+            const { type, id } = editorInfo;
 
-            if (!editor || typeof editor.setValue !== 'function') {
-                throw new Error('编辑器对象无效或缺少setValue方法');
+            console.log('[粘贴助手] 开始粘贴到:', type, id);
+            console.log('[粘贴助手] 内容长度:', content.length);
+
+            let success = false;
+
+            // 根据编辑器类型选择粘贴方法
+            if (type === 'codemirror') {
+                // CodeMirror 编辑器
+                if (typeof window.codeEditors === 'undefined' || !window.codeEditors[id]) {
+                    throw new Error('CodeMirror编辑器不存在');
+                }
+                const editor = window.codeEditors[id];
+                if (!editor || typeof editor.setValue !== 'function') {
+                    throw new Error('编辑器对象无效或缺少setValue方法');
+                }
+                editor.setValue(content);
+                success = true;
+
+            } else if (type === 'ueditor') {
+                // UEditor 编辑器
+                if (typeof window.UE === 'undefined' || !window.UE.instants || !window.UE.instants[id]) {
+                    throw new Error('UEditor编辑器不存在');
+                }
+                const editor = window.UE.instants[id];
+                if (!editor || typeof editor.setContent !== 'function') {
+                    throw new Error('UEditor对象无效或缺少setContent方法');
+                }
+
+                // 使用setContent绕过粘贴检测
+                editor.setContent(content);
+
+                // 触发内容变化事件
+                try {
+                    if (typeof editor.fireEvent === 'function') {
+                        editor.fireEvent('contentChange');
+                    }
+                } catch (e) {
+                    console.warn('[粘贴助手] fireEvent失败:', e);
+                }
+
+                // 调用页面的状态更新函数
+                try {
+                    if (typeof window.answerContentChange === 'function') {
+                        window.answerContentChange();
+                    }
+
+                    // 注意: 不调用loadEditorAnswerd，因为它内部会调用UE.getEditor()
+                    // 这会导致创建新的编辑器实例！
+                    // 用户保存时，页面会自动调用相关函数更新答题状态
+                } catch (e) {
+                    console.warn('[粘贴助手] 状态更新失败（不影响粘贴）:', e);
+                }
+
+                success = true;
             }
 
-            // 使用setValue方法绕过粘贴检测
-            editor.setValue(code);
+            if (success) {
+                status.textContent = `内容已成功粘贴到 ${type === 'codemirror' ? '代码编辑器' : type === 'ueditor' ? '作业编辑器' : '答题框'}`;
+                status.style.color = '#4CAF50';
+                console.log('[粘贴助手] 粘贴成功');
 
-            status.textContent = `代码已成功粘贴到编辑器 ${selectedEditor}`;
-            status.style.color = '#4CAF50';
+                // 保存内容到localStorage
+                localStorage.setItem('paste-helper-last-code', content);
+            }
 
-            console.log('[代码助手] 代码粘贴成功');
-
-            // 保存代码到localStorage
-            localStorage.setItem('paste-helper-last-code', code);
         } catch (error) {
-            console.error('[代码助手] 粘贴失败:', error);
+            console.error('[粘贴助手] 粘贴失败:', error);
             status.textContent = '粘贴失败: ' + error.message;
             status.style.color = '#f44336';
         }
@@ -426,14 +521,14 @@
     function showHelper() {
         if (pasteHelper) {
             pasteHelper.style.display = 'block';
-            console.log('[代码助手] 显示助手窗口');
+            console.log('[粘贴助手] 显示助手窗口');
         }
     }
 
     function hideHelper() {
         if (pasteHelper) {
             pasteHelper.style.display = 'none';
-            console.log('[代码助手] 隐藏助手窗口');
+            console.log('[粘贴助手] 隐藏助手窗口');
         }
     }
 
@@ -441,7 +536,7 @@
         if (pasteHelper) {
             pasteHelper.remove();
             pasteHelper = null;
-            console.log('[代码助手] 移除助手窗口');
+            console.log('[粘贴助手] 移除助手窗口');
         }
     }
 
@@ -452,7 +547,7 @@
             setupDragging();
             setupEventListeners();
             restoreLastCode();
-            console.log('[代码助手] 创建助手窗口');
+            console.log('[粘贴助手] 创建助手窗口');
         }
         showHelper();
     }
@@ -484,14 +579,14 @@
         try {
             // 避免重复初始化
             if (isInitialized) {
-                console.log('[代码助手] 已经初始化过，跳过重复初始化');
+                console.log('[粘贴助手] 已经初始化过，跳过重复初始化');
                 return;
             }
 
-            console.log('[代码助手] 开始初始化...');
+            console.log('[粘贴助手] 开始初始化...');
 
             // 等待编辑器加载
-            const hasEditors = await waitForCodeEditors();
+            const hasEditors = await waitForEditors();
 
             if (hasEditors) {
                 // 只在检测到编辑器时才创建界面
@@ -499,14 +594,14 @@
                 updateEditorList();
                 setupMutationObserver();
 
-                console.log('[代码助手] 超星代码粘贴助手已成功加载');
+                console.log('[粘贴助手] 超星粘贴助手已成功加载');
 
                 // 定期更新编辑器列表（降低频率）
                 setInterval(() => {
                     updateEditorList();
                 }, 5000);
             } else {
-                console.log('[代码助手] 当前页面无编辑器，等待后续检测');
+                console.log('[粘贴助手] 当前页面无编辑器，等待后续检测');
                 // 启动监听器，等待编辑器出现
                 setupMutationObserver();
             }
@@ -514,7 +609,7 @@
             isInitialized = true;
 
         } catch (error) {
-            console.error('[代码助手] 初始化失败:', error);
+            console.error('[粘贴助手] 初始化失败:', error);
         }
     }
 
