@@ -367,7 +367,12 @@
                 }
 
                 // 使用setContent绕过粘贴检测
-                editor.setContent(content);
+                const htmlContent = content
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\n/g, '<br>');
+                editor.setContent(htmlContent);
 
                 // 触发内容变化事件
                 try {
