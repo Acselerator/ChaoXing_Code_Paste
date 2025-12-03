@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         超星粘贴助手
 // @namespace    http://tampermonkey.net/
-// @version      1.2.1
+// @version      1.2.2
 // @description  绕过粘贴检测，支持代码题(CodeMirror)和作业题(UEditor)
 // @author       muqy1818
 // @match        *://*.chaoxing.com/*
@@ -53,6 +53,11 @@
                     ueKeys.forEach(key => {
                         const editor = window.UE.instants[key];
                         if (editor && editor.ready) {
+                            // 检查编辑器是否可见
+                            // 必须有容器，且容器有尺寸
+                            if (!editor.container || (editor.container.offsetWidth === 0 && editor.container.offsetHeight === 0)) {
+                                return;
+                            }
                             validCount++;
                         }
                     });
@@ -261,6 +266,20 @@
                 const editor = window.UE.instants[key];
                 // 只添加有效的编辑器实例
                 if (editor && editor.ready) {
+                    // 检查编辑器是否可见
+                    // 必须有容器，且容器有尺寸
+                    if (!editor.container || (editor.container.offsetWidth === 0 && editor.container.offsetHeight === 0)) {
+                        return;
+                    }
+
+                    // 检查是否为只读编辑器
+                    if (editor.options && editor.options.readonly) {
+                        return;
+                    }
+                    if (editor.body && editor.body.getAttribute('contenteditable') === 'false') {
+                        return;
+                    }
+
                     allEditors.push({
                         type: 'ueditor',
                         id: key,
@@ -586,6 +605,43 @@
             if (isInitialized) {
                 console.log('[粘贴助手] 已经初始化过，跳过重复初始化');
                 return;
+            }
+
+            // 检查窗口大小，如果太小（如在小的iframe中），则不初始化
+            if (window.innerWidth < 300 || window.innerHeight < 300) {
+                console.log('[粘贴助手] 窗口尺寸过小，跳过初始化');
+                return;
+            }
+
+            // 检查URL，排除UEditor的弹窗页面（更宽松的匹配）
+            const currentUrl = window.location.href;
+            if (currentUrl.includes('/dialogs/') ||
+                currentUrl.includes('image.html') ||
+                currentUrl.includes('attachment.html') ||
+                currentUrl.includes('video.html') ||
+                currentUrl.includes('file.html')) {
+                console.log('[粘贴助手] 检测到UEditor弹窗页面(URL)，跳过初始化');
+                return;
+            }
+
+            // 检查是否加载了 UEditor 的 dialogs 内部脚本 (internal.js)
+            // 这是最准确的判断方式，因为所有UEditor标准弹窗都会加载这个文件
+            const scripts = document.getElementsByTagName('script');
+            for (let i = 0; i < scripts.length; i++) {
+                if (scripts[i].src && scripts[i].src.includes('internal.js')) {
+                    console.log('[粘贴助手] 检测到 internal.js，判定为UEditor弹窗，跳过初始化');
+                    return;
+                }
+            }
+
+            // 检查 iframe ID (如果有权限访问)
+            try {
+                if (window.frameElement && window.frameElement.id && window.frameElement.id.startsWith('edui_iframe_')) {
+                    console.log('[粘贴助手] 检测到UEditor iframe ID，跳过初始化');
+                    return;
+                }
+            } catch (e) {
+                // 忽略跨域错误
             }
 
             console.log('[粘贴助手] 开始初始化...');
