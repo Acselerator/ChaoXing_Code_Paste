@@ -4,14 +4,15 @@
 
 ## 功能特性
 
-- 支持代码题（CodeMirror编辑器）
-- 支持作业题（UEditor富文本编辑器）
-- 可拖拽的浮动窗口界面
-- 支持多行内容输入
-- 自动检测页面上的所有编辑器
-- 内容自动保存恢复
-- 快捷键支持（Ctrl+Enter快速粘贴）
-- 响应式设计，适配不同屏幕
+- **极速粘贴**：智能绕过平台限制，一键注入代码，支持CodeMirror和UEditor编辑器。
+- **智能防扰**：自动识别作业环境，排除弹窗干扰，仅在需要时出现。
+- **优雅界面**：现代化的悬浮窗设计，可拖拽、可折叠，记忆位置，不遮挡视线。
+- **多功能支持**：
+  - 支持多行内容输入
+  - 自动检测页面上的所有编辑器
+  - 内容自动保存恢复
+  - 快捷键支持（Ctrl+Enter快速粘贴）
+  - 响应式设计，适配不同屏幕
 
 ## 技术原理
 
@@ -57,19 +58,19 @@ editor.addListener('beforepaste', function(o, html) {
 **[从Greasy Fork安装](https://greasyfork.org/zh-CN/scripts/549900)**
 
 或者其他安装方式：
-- [从GitHub直接安装](https://raw.githubusercontent.com/muqy1818/ChaoXing_Code/master/chaoxing-paste-helper.user.js)
+- [从GitHub直接安装](https://raw.githubusercontent.com/MuQY1818/ChaoXing_Code_Paste/master/chaoxing-paste-helper.user.js)
 - 手动安装：打开Tampermonkey管理面板 → 添加新脚本 → 复制粘贴脚本内容 → 保存并启用
 
 ## 使用方法
 
-1. 打开超星网站的作业或考试页面
-2. 等待右上角出现"超星粘贴助手"浮动窗口
-3. 在文本框中输入要粘贴的内容（代码/作业答案等）
-4. 选择目标编辑器
+1. **打开作业页面**：打开超星网站的作业或考试页面。
+2. **等待助手出现**：助手会自动检测并显示在右上角。
+3. **输入内容**：在悬浮窗的文本框中输入要粘贴的内容（代码/作业答案等）。
+4. **选择编辑器**：
    - 代码编辑器：代码题
    - 作业编辑器：简答题、填空题等
-5. 点击"粘贴"按钮或使用快捷键Ctrl+Enter
-6. 粘贴成功后，记得点击页面的"暂时保存"或"提交"按钮
+5. **一键粘贴**：点击"粘贴"按钮或使用快捷键Ctrl+Enter。
+6. **保存提交**：粘贴成功后，记得点击页面的"暂时保存"或"提交"按钮。
 
 ## 界面预览
 
@@ -91,6 +92,12 @@ editor.addListener('beforepaste', function(o, html) {
 - 建议仅用于调试和测试自己的代码
 
 ## 更新日志
+
+### v1.2.2 (2025-12-03)
+- ✨ 优化编辑器可见性检测，彻底解决隐藏编辑器误判问题
+- 🛡️ 新增只读编辑器过滤，避免在查看模式下误触发
+- 🚫 智能排除UEditor弹窗页面（如图片/附件上传），防止助手在弹窗中出现
+- ⚡ 性能优化，减少不必要的DOM操作
 
 ### v1.2.1 (2025-10-09)
 - 修复粘贴后创建多余编辑器实例的问题
@@ -128,7 +135,6 @@ editor.addListener('beforepaste', function(o, html) {
 
 核心文件：
 - `chaoxing-paste-helper.user.js` - 主脚本文件
-- `description.html` - 详细功能介绍
 
 ## 贡献指南
 
