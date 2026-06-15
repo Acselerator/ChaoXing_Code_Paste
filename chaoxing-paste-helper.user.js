@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         超星粘贴助手
 // @namespace    http://tampermonkey.net/
-// @version      1.3.0
+// @version      1.3.1
 // @description  绕过粘贴检测，支持代码题(CodeMirror)和作业题(UEditor)
 // @author       muqy1818
 // @match        *://*.chaoxing.com/*
@@ -20,6 +20,8 @@
     let isDragging = false;
     let dragOffset = { x: 0, y: 0 };
     const orderedImageDropDocs = new WeakSet();
+    const editorCursorListeners = new Set();
+    const editorCursorState = new Map();
     const imageNameCollator = new Intl.Collator('zh-CN', {
         numeric: true,
         sensitivity: 'variant'
@@ -385,6 +387,7 @@
         }
 
         setupOrderedImageDropHandlers(allEditors);
+        setupEditorCursorTracking(allEditors);
     }
 
     function setHelperStatus(message, color) {
@@ -437,6 +440,82 @@
         return null;
     }
 
+    function getEditorKey(editorInfo) {
+        return editorInfo ? `${editorInfo.type}:${editorInfo.id}` : '';
+    }
+
+    function rememberEditorCursor(editorInfo, cursorData) {
+        const key = getEditorKey(editorInfo);
+        if (!key) return;
+        editorCursorState.set(key, cursorData || true);
+    }
+
+    function rememberCodeMirrorCursor(editorInfo, editor) {
+        if (!editor || typeof editor.getCursor !== 'function') return;
+
+        try {
+            const from = editor.getCursor('from');
+            const to = editor.getCursor('to');
+            rememberEditorCursor(editorInfo, { from, to });
+        } catch (e) {
+            rememberEditorCursor(editorInfo, true);
+        }
+    }
+
+    function rememberUEditorCursor(editorInfo, editor) {
+        if (!editor) return;
+
+        try {
+            if (editor.selection && typeof editor.selection.getRange === 'function') {
+                const range = editor.selection.getRange();
+                if (range && typeof range.cloneRange === 'function') {
+                    rememberEditorCursor(editorInfo, range.cloneRange());
+                    return;
+                }
+            }
+        } catch (e) {
+            // 光标记录失败时仍保留一个可用标记，后续由UEditor自行使用当前selection。
+        }
+
+        rememberEditorCursor(editorInfo, true);
+    }
+
+    function setupEditorCursorTracking(allEditors) {
+        allEditors.forEach(editorInfo => {
+            const key = getEditorKey(editorInfo);
+            if (!key || editorCursorListeners.has(key)) return;
+
+            const editor = getEditorFromInfo(editorInfo);
+            if (!editor) return;
+
+            if (editorInfo.type === 'codemirror') {
+                const remember = () => rememberCodeMirrorCursor(editorInfo, editor);
+                if (typeof editor.on === 'function') {
+                    editor.on('cursorActivity', remember);
+                    editor.on('focus', remember);
+                    editorCursorListeners.add(key);
+                }
+                return;
+            }
+
+            if (editorInfo.type === 'ueditor') {
+                const remember = () => rememberUEditorCursor(editorInfo, editor);
+                if (typeof editor.addListener === 'function') {
+                    editor.addListener('selectionchange', remember);
+                    editor.addListener('focus', remember);
+                    editorCursorListeners.add(key);
+                }
+
+                if (editor.body && !editorCursorListeners.has(`${key}:body`)) {
+                    ['mouseup', 'keyup', 'focus'].forEach(eventName => {
+                        editor.body.addEventListener(eventName, remember, true);
+                    });
+                    editorCursorListeners.add(`${key}:body`);
+                }
+            }
+        });
+    }
+
     function isUsableUEditor(editor) {
         if (!editor || typeof editor.setContent !== 'function') return false;
         if (editor.options && editor.options.readonly) return false;
@@ -461,6 +540,55 @@
             .filter(item => isUsableUEditor(item.editor));
 
         return editors.length === 1 ? editors[0] : null;
+    }
+
+    function insertIntoCodeMirror(editorInfo, editor, content) {
+        if (typeof editor.replaceRange === 'function' && typeof editor.getCursor === 'function') {
+            const savedCursor = editorCursorState.get(getEditorKey(editorInfo));
+            let from = null;
+            let to = null;
+
+            if (savedCursor && savedCursor.from && savedCursor.to) {
+                from = savedCursor.from;
+                to = savedCursor.to;
+            } else if (typeof editor.hasFocus === 'function' && editor.hasFocus()) {
+                from = editor.getCursor('from');
+                to = editor.getCursor('to');
+            }
+
+            if (from && to) {
+                editor.replaceRange(content, from, to);
+                return;
+            }
+        }
+
+        if (typeof editor.replaceRange === 'function' && typeof editor.posFromIndex === 'function' && typeof editor.getValue === 'function') {
+            editor.replaceRange(content, editor.posFromIndex(editor.getValue().length));
+        } else if (typeof editor.getValue === 'function') {
+            editor.setValue(editor.getValue() + content);
+        } else {
+            editor.setValue(content);
+        }
+    }
+
+    function insertHtmlIntoUEditor(editorInfo, editor, html) {
+        const savedRange = editorCursorState.get(getEditorKey(editorInfo));
+
+        try {
+            if (savedRange && typeof savedRange.select === 'function') {
+                savedRange.select();
+            }
+        } catch (e) {
+            // 恢复失败时退回追加。
+        }
+
+        if (savedRange && typeof savedRange.select === 'function' && typeof editor.execCommand === 'function') {
+            editor.execCommand('insertHTML', html);
+        } else {
+            editor.setContent(html, true);
+        }
+
+        notifyUEditorChanged(editor);
     }
 
     function getImageFiles(fileList) {
@@ -618,16 +746,11 @@
         }
     }
 
-    function insertImagesToUEditor(editor, html) {
+    function insertImagesToUEditor(editorInfo, editor, html) {
         if (typeof editor.focus === 'function') {
             editor.focus();
         }
-        if (typeof editor.execCommand === 'function') {
-            editor.execCommand('insertHTML', html, true);
-        } else {
-            editor.setContent(html, true);
-        }
-        notifyUEditorChanged(editor);
+        insertHtmlIntoUEditor(editorInfo, editor, html);
     }
 
     async function uploadOrderedImages(fileList, preferredEditorInfo) {
@@ -650,6 +773,7 @@
         }
 
         setSelectedEditorInfo(target.info);
+        rememberUEditorCursor(target.info, target.editor);
 
         try {
             const uploadUrl = getOrderedImageUploadUrl(target.editor);
@@ -660,7 +784,7 @@
                 results.push(await uploadImageFile(files[i], uploadUrl));
             }
 
-            insertImagesToUEditor(target.editor, buildImagesHtml(results));
+            insertImagesToUEditor(target.info, target.editor, buildImagesHtml(results));
             setHelperStatus(`已按文件名自然排序插入 ${files.length} 张图片`, '#4CAF50');
             console.log('[粘贴助手] 图片插入顺序:', files.map(file => file.name));
         } catch (error) {
@@ -743,13 +867,7 @@
                 if (!editor || typeof editor.setValue !== 'function') {
                     throw new Error('编辑器对象无效或缺少setValue方法');
                 }
-                if (typeof editor.replaceRange === 'function' && typeof editor.posFromIndex === 'function' && typeof editor.getValue === 'function') {
-                    editor.replaceRange(content, editor.posFromIndex(editor.getValue().length));
-                } else if (typeof editor.getValue === 'function') {
-                    editor.setValue(editor.getValue() + content);
-                } else {
-                    editor.setValue(content);
-                }
+                insertIntoCodeMirror(editorInfo, editor, content);
                 success = true;
 
             } else if (type === 'ueditor') {
@@ -768,29 +886,7 @@
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/\n/g, '<br>');
-                editor.setContent(htmlContent, true);
-
-                // 触发内容变化事件
-                try {
-                    if (typeof editor.fireEvent === 'function') {
-                        editor.fireEvent('contentChange');
-                    }
-                } catch (e) {
-                    console.warn('[粘贴助手] fireEvent失败:', e);
-                }
-
-                // 调用页面的状态更新函数
-                try {
-                    if (typeof window.answerContentChange === 'function') {
-                        window.answerContentChange();
-                    }
-
-                    // 注意: 不调用loadEditorAnswerd，因为它内部会调用UE.getEditor()
-                    // 这会导致创建新的编辑器实例！
-                    // 用户保存时，页面会自动调用相关函数更新答题状态
-                } catch (e) {
-                    console.warn('[粘贴助手] 状态更新失败（不影响粘贴）:', e);
-                }
+                insertHtmlIntoUEditor(editorInfo, editor, htmlContent);
 
                 success = true;
             }
