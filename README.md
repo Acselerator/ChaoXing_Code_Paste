@@ -78,7 +78,8 @@ editor.addListener('beforepaste', function(o, html) {
 
 ## 界面预览
 
-![超星粘贴助手界面演示](https://pic2.zhimg.com/v2-aec43f7327c64acce4a7e0a16c6b920f_1440w.jpg)
+<img width="1368" height="707" alt="image" src="https://github.com/user-attachments/assets/066e986e-8f64-4eeb-93ec-615a4cec6e91" />
+
 
 ## 兼容性
 
