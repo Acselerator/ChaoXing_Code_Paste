@@ -614,7 +614,13 @@
         if (!dataTransfer) return false;
         const items = Array.from(dataTransfer.items || []);
         if (items.length > 0) {
-            return items.some(item => item.kind === 'file' && /^image\//i.test(item.type || ''));
+            return items.some(item => {
+                if (item.kind !== 'file') return false;
+                if (/^image\//i.test(item.type || '')) return true;
+
+                const file = typeof item.getAsFile === 'function' ? item.getAsFile() : null;
+                return getImageFiles(file ? [file] : []).length > 0;
+            });
         }
         return getImageFiles(dataTransfer.files).length > 0;
     }
